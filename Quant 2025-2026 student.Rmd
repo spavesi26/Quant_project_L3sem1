@@ -1,0 +1,329 @@
+---
+title: "Quant 2024-2025"
+author: "Jude"
+date: "2024-10-22"
+output: html_document
+---
+Do pathogen disgust scores (with moral and sexual disgust scores fed in as exploratory) predict stigma scores towards different mental health conditions? 
+
+First, load in the libraries that you will need to carry out the data wrangling and analysis. These are common ones for this sort of analysis.
+```{r}
+#load in packages
+library(tidyverse)
+library(psych)
+library(broom)
+library(car)
+#install.packages("effectsize")
+library(effectsize)
+library(pwr)
+#install.packages("ltm")
+library(ltm)
+options("scipen" = 10, "digits" = 4)
+getwd()
+
+#package psych -> use describe 
+citation()
+version$version.string
+citation("tidyverse")
+citation("psych")
+citation("effectsize")
+citation("pwr")
+citation("ltm")
+```
+
+Now, read in the raw data and assign it to an object called rawdata.  
+```{r}
+raw_data <- read_csv("2024-6-11.csv")
+
+#Currently, this raw data won't make a lot of sense. It is in long (as opposed to wide) format and it contains a lot of stuff that we don't need. But go ahead and have a look at it anyway.
+raw_data
+```
+
+This next code chunk is rather complex so don't worry, just go ahead and use the code below that we are providing for you, it will start to make sense in a moment.  Here is what it's doing: 
+1. We want to remove participants with user statuses who should not be there (e.g., test users, administrators).  
+2.,We want to tell R what columns/variables we want to move forward with and which ones we don't need (Experimentum provides a lot of administrative information).
+3. We are converting our long format data into wide format so that we can work with our data.
+
+
+(Quick note, you might see that throughout this exercise, instead of simply writing the name of function, I am writing "dplyr::" before it. This is because R sometimes bugs out and this is a sort of failsafe that debugs it. You can try just writing the name of your function to see if it works).
+```{r}
+#go back and try understand this 
+data <- raw_data %>%
+  group_by(user_id, q_id) %>%
+  filter(session_id == min(session_id), endtime == min(endtime)) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  filter(user_status %in% c("guest", "registered")) %>%
+  dplyr::select(user_id, user_sex, user_age, session_id, q_name, dv) %>%
+  pivot_wider(names_from = q_name, values_from = dv)  %>%
+  drop_na()
+```
+
+Type "data" now in the code chunk below and run it.  You'll see that your data has transformed from long to wide format and contains only the participant data that we want to move forward with now. A lot of unnecessary information has been removed. It should be making a little more sense, now. 
+
+```{r}
+#just viewing the data
+data
+
+data_exp <- describe(data) #beautiful
+```
+
+Now that our data is in wide format, we are able to see what each column corresponds to which items on a particular questionnaire measure. 
+
+Let's see how many men, women, and non-binary participants we have.  
+Note: Experimentum's output labels gender as sex, but it was gender we recorded.  Please report gender (man, woman, non binary) and not biological sex (male and female) in your report.
+```{r}
+#for gender
+data_gender <- data %>% 
+  group_by(user_sex) %>%
+  summarise(number = n())
+
+#You should return to the demographics at a later stage and calculate some descriptive statistics on age.
+data_age <- data %>% 
+  summarise(mean_age = mean(user_age),
+            sd_age = sd(user_age),
+            min_age = min(user_age),
+            max_age = max(user_age))
+
+#power analysis
+#do i have to do it and if so what type????
+```
+
+Let's calculate our questionnaire scores. Each code will  follow the same formula so once you've mastered the first code for the first questionnaire score, all you need to do is amend the code for the next one, and so one. 
+
+First, let's calculate the scores on the 3 sub scales of the TDDS (three domains of disgust scale):
+-predictor variable of pathogen disgust score (as measured by TDDS sub scale items 3, 6, 9, 12, 15, 18, 21)
+-predictor variable of moral disgust score (as measured by TDDS sub scale items 1, 4, 7, 10, 13, 16, 19)
+-predictor variable of sexual disgust score (as measured by TDDS sub scale items 2, 5, 8, 11, 14, 17, 20)
+(There's no need to calculate overall disgust scores that total pathogen, sexual, and moral disgust scores; we are only interested in each sub scale)
+Complete the first part of the following code by selecting the columns that correspond to the pathogen disgust items and remember to include user_id too. Assign this to an object called "pathogen".
+
+```{r}
+#pathogen disgust scores
+pathogen <- data %>% dplyr::select(user_id,PD1, PD2, PD3, PD4, PD5, PD6, PD7) %>%
+  pivot_longer(cols = c(PD1, PD2, PD3, PD4, PD5, PD6, PD7),
+                         names_to = "Question",
+                         values_to = "Response") %>%
+                        mutate(Response = as.numeric(Response)) %>%
+            group_by(user_id) %>%
+            summarise(total_pathogen = sum(Response)) %>%
+  ungroup()
+```
+
+Now do the same for sexual disgust and assign it to an object called sexual
+```{r}
+#sexual disgust scores
+sexual <- data %>% dplyr::select(user_id,SD1, SD2, SD3, SD4, SD5, SD6, SD7) %>%
+  pivot_longer(cols = c(SD1, SD2, SD3, SD4, SD5, SD6, SD7),
+                         names_to = "Question",
+                         values_to = "Response") %>%
+                        mutate(Response = as.numeric(Response)) %>%
+            group_by(user_id) %>%
+            summarise(total_sexual = sum(Response)) %>%
+  ungroup()
+```
+
+Now do the same for moral disgust and assign it to an object called moral
+```{r}
+#moral disgust scores
+moral <- data %>% dplyr::select(user_id,MD1, MD2, MD3, MD4, MD5, MD6, MD7) %>%
+  pivot_longer(cols = c(MD1, MD2, MD3, MD4, MD5, MD6, MD7),
+                         names_to = "Question",
+                         values_to = "Response") %>%
+                        mutate(Response = as.numeric(Response)) %>%
+            group_by(user_id) %>%
+            summarise(total_moral = sum(Response)) %>%
+  ungroup()
+```
+
+Great!  Now we will calculate our response/dependent variable scores:
+We need to do this three times, once for each vignette.  Use the exact code that you used above and apply it to the stigma ratings for schizophrenia, depression, and anxiety.
+-response variable of stigma score towards schizophrenia (as measured by the AQ27 sub scale items 1-27)
+-response variable of stigma score towards anxiety (as measured by the AQ27 sub scale items 1-27)
+-response variable of stigma score towards depression (as measured by the AQ27 sub scale items 1-27)
+
+Amend the code from above to calculate the stigma scores for schizophrenia and assign it to an object called schizophrenia
+```{r}
+#schizophrenia stigma scores
+schizophrenia <- data %>% dplyr::select(user_id,SCHIZ_Q1,SCHIZ_Q2,SCHIZ_Q3,SCHIZ_Q4,SCHIZ_Q5,SCHIZ_Q6,SCHIZ_Q7,SCHIZ_Q8,SCHIZ_Q9,SCHIZ_Q10,SCHIZ_Q11,SCHIZ_Q12,SCHIZ_Q13,SCHIZ_Q14,SCHIZ_Q15,SCHIZ_Q16,SCHIZ_Q17,SCHIZ_Q18,SCHIZ_Q19,SCHIZ_Q20,SCHIZ_Q21,SCHIZ_Q22,SCHIZ_Q23,SCHIZ_Q24,SCHIZ_Q25,SCHIZ_Q26,SCHIZ_Q27) %>%
+  pivot_longer(cols = c(SCHIZ_Q1,SCHIZ_Q2,SCHIZ_Q3,SCHIZ_Q4,SCHIZ_Q5,SCHIZ_Q6,SCHIZ_Q7,SCHIZ_Q8,SCHIZ_Q9,SCHIZ_Q10,SCHIZ_Q11,SCHIZ_Q12,SCHIZ_Q13,SCHIZ_Q14,SCHIZ_Q15,SCHIZ_Q16,SCHIZ_Q17,SCHIZ_Q18,SCHIZ_Q19,SCHIZ_Q20,SCHIZ_Q21,SCHIZ_Q22,SCHIZ_Q23,SCHIZ_Q24,SCHIZ_Q25,SCHIZ_Q26,SCHIZ_Q27),
+                         names_to = "Question",
+                         values_to = "Response") %>%
+                        mutate(Response = as.numeric(Response)) %>%
+            group_by(user_id) %>%
+            summarise(total_schiz_stig = sum(Response)) %>%
+  ungroup()
+```
+
+Now do the same for generalised anxiety disorder and assign it to an object called anxiety
+```{r}
+#anxiety stigma scores
+anxiety <- data %>% dplyr::select(user_id,GAD_Q1,GAD_Q2,GAD_Q3,GAD_Q4,GAD_Q5,GAD_Q6,GAD_Q7,GAD_Q8,GAD_Q9,GAD_Q10,GAD_Q11,GAD_Q12,GAD_Q13,GAD_Q14,GAD_Q15,GAD_Q16,GAD_Q17,GAD_Q18,GAD_Q19,GAD_Q20,GAD_Q21,GAD_Q22,GAD_Q23,GAD_Q24,GAD_Q25,GAD_Q26,GAD_Q27) %>%
+  pivot_longer(cols = c(GAD_Q1,GAD_Q2,GAD_Q3,GAD_Q4,GAD_Q5,GAD_Q6,GAD_Q7,GAD_Q8,GAD_Q9,GAD_Q10,GAD_Q11,GAD_Q12,GAD_Q13,GAD_Q14,GAD_Q15,GAD_Q16,GAD_Q17,GAD_Q18,GAD_Q19,GAD_Q20,GAD_Q21,GAD_Q22,GAD_Q23,GAD_Q24,GAD_Q25,GAD_Q26,GAD_Q27),
+                         names_to = "Question",
+                         values_to = "Response") %>%
+                        mutate(Response = as.numeric(Response)) %>%
+            group_by(user_id) %>%
+            summarise(total_anx_stig = sum(Response)) %>%
+  ungroup()
+
+```
+
+Now do the same for depression and assign it to an object called depression
+```{r}
+#depression stigma scores
+depression <- data %>% dplyr::select(user_id,DEP_Q1,DEP_Q2,DEP_Q3,DEP_Q4,DEP_Q5,DEP_Q6,DEP_Q7,DEP_Q8,DEP_Q9,DEP_Q10,DEP_Q11,DEP_Q12,DEP_Q13,DEP_Q14,DEP_Q15,DEP_Q16,DEP_Q17,DEP_Q18,DEP_Q19,DEP_Q20,DEP_Q21,DEP_Q22,DEP_Q23,DEP_Q24,DEP_Q25,DEP_Q26,DEP_Q27) %>%
+  pivot_longer(cols = c(DEP_Q1,DEP_Q2,DEP_Q3,DEP_Q4,DEP_Q5,DEP_Q6,DEP_Q7,DEP_Q8,DEP_Q9,DEP_Q10,DEP_Q11,DEP_Q12,DEP_Q13,DEP_Q14,DEP_Q15,DEP_Q16,DEP_Q17,DEP_Q18,DEP_Q19,DEP_Q20,DEP_Q21,DEP_Q22,DEP_Q23,DEP_Q24,DEP_Q25,DEP_Q26,DEP_Q27),
+                         names_to = "Question",
+                         values_to = "Response") %>%
+                        mutate(Response = as.numeric(Response)) %>%
+            group_by(user_id) %>%
+            summarise(total_dep_stig = sum(Response)) %>%
+  ungroup()
+
+```
+
+Now we want to join all of these scores into a mega table by user_id.   Remember that you cannot join more than 2 tables at a time. Assign this to an object called all_dat.
+
+```{r}
+all_dat <- schizophrenia %>%
+  left_join(anxiety, by = "user_id") %>%
+  left_join(depression, by = "user_id")
+#have a look at all_dat and see how your data is transforming into data you can see and understand.
+all_dat
+```
+
+Calculate the descriptive data for our data that we have joined together. Assign it to an object called "descriptives".  
+```{r}
+descriptives <- cross_join(data_gender, data_age)
+```
+ 
+Data vizualisations. Keep in mind that you are going to use the data from all_dat to create your graphs. This means that you should be looking at what each variable/column is named as this will be read into your code Rinse and repeat for any other vizualisations you wish to include. 
+
+```{r}
+#creating big data for disgust
+disgust <- moral %>%
+  left_join(sexual, by = "user_id") %>%
+  left_join(pathogen, by = "user_id")
+
+#making final boss data
+all_dat_plot <- inner_join(disgust, all_dat, by = "user_id")
+
+#pathogen disgust and schizophrenia
+ggplot(all_dat_plot, aes(x = total_pathogen, y = total_schiz_stig)) +
+  geom_point(colour = "darkmagenta") + 
+  scale_x_continuous(name = "Pathogen disgust") +
+  scale_y_continuous(name = "Schizophrenia Stigma") +
+  theme_classic() +
+  geom_smooth(method = "lm")
+  
+#Hurrah. We have a scatterplot.  Rinse and repeat for any other vizualisations you wish to include. Think about which combinaations of variables it would make most sense to visualise.
+
+#make triple scatterplots for each MH condition -> see L2 notes for that 
+```
+```{r}
+#moral disgust and schizophrenia
+ggplot(all_dat_plot, aes(x = total_moral, y = total_schiz_stig)) +
+  geom_point(colour = "darkolivegreen") + 
+  scale_x_continuous(name = "Moral disgust") +
+  scale_y_continuous(name = "Schizophrenia Stigma") +
+  theme_classic() +
+  geom_smooth(method = "lm")
+
+```
+```{r}
+#sexual disgust and schizophrenia
+ggplot(all_dat_plot, aes(x = total_sexual, y = total_schiz_stig)) +
+  geom_point(colour = "darkslategray") + 
+  scale_x_continuous(name = "Sexual disgust") +
+  scale_y_continuous(name = "Schizophrenia Stigma") +
+  theme_classic() +
+  geom_smooth(method = "lm")
+```
+```{r}
+#triple schizophrenia/anxiety/depression plots ????
+all_dat_plot <- rename(all_dat_plot, 'Generalised Anxiety Disorder' = total_anx_stig,'Depression' = total_dep_stig, 'Schizophrenia' = total_schiz_stig)
+
+all_dat_long <- all_dat_plot %>% 
+  pivot_longer(cols = 'Schizophrenia':'Depression',names_to = "total_type", values_to = "values")
+```
+
+```{r}
+#Pathogen disgust and MHcond.
+ggplot(all_dat_long, aes(x = total_pathogen, y = values)) +
+ geom_point() +
+  geom_smooth(method = lm, colour = "darkmagenta") +
+  facet_wrap(~total_type) +
+  labs(x = "Pathogen Disgust",
+       y = "Stigmatization")
+```
+
+```{r}
+#Moral disgust and MHcond.
+ggplot(all_dat_long, aes(x = total_moral, y = values)) +
+ geom_point() +
+  geom_smooth(method = lm, colour = "darkolivegreen") +
+  facet_wrap(~total_type) +
+  labs(x = "Moral Disgust",
+       y = "Stigmatization")
+```
+
+```{r}
+#Sexual disgust and MHcond.
+ggplot(all_dat_long, aes(x = total_sexual, y = values)) +
+ geom_point() +
+  geom_smooth(method = lm, colour = "darkslategray") +
+  facet_wrap(~total_type) +
+  labs(x = "Sexual Disgust",
+       y = "Stigmatization")
+```
+
+
+It is good practice to mean centering the predictor variables, so, in our case, pathogen, moral, and sexual disgust.  Response/dependent variables do not need to be mean centrered.  I'll be very nice and provide the code for this.
+```{r}
+TDDScentered <- all_dat_plot %>%
+  mutate(total_moral_cent = total_moral - mean(total_moral),
+                       total_sexual_cent = total_sexual - mean(total_sexual),
+                       total_pathogen_cent = total_pathogen - mean(total_pathogen))
+```
+
+#cronbachs alpha
+```{r}
+#research what croncach's alpha is more when you have a bit of time 
+anxiety_alpha <-cronbach.alpha(dplyr::select(data, GAD_Q1,GAD_Q2,GAD_Q3,GAD_Q4,GAD_Q5,GAD_Q6,GAD_Q7,GAD_Q8,GAD_Q9,GAD_Q10,GAD_Q11,GAD_Q12,GAD_Q13,GAD_Q14,GAD_Q15,GAD_Q16,GAD_Q17,GAD_Q18,GAD_Q19,GAD_Q20,GAD_Q21,GAD_Q22,GAD_Q23,GAD_Q24,GAD_Q25,GAD_Q26,GAD_Q27))
+
+depression_alpha <-cronbach.alpha(dplyr::select(data, DEP_Q1,DEP_Q2,DEP_Q3,DEP_Q4,DEP_Q5,DEP_Q6,DEP_Q7,DEP_Q8,DEP_Q9,DEP_Q10,DEP_Q11,DEP_Q12,DEP_Q13,DEP_Q14,DEP_Q15,DEP_Q16,DEP_Q17,DEP_Q18,DEP_Q19,DEP_Q20,DEP_Q21,DEP_Q22,DEP_Q23,DEP_Q24,DEP_Q25,DEP_Q26,DEP_Q27))
+
+schizophrenia_alpha <- cronbach.alpha(dplyr::select(data, SCHIZ_Q1,SCHIZ_Q2,SCHIZ_Q3,SCHIZ_Q4,SCHIZ_Q5,SCHIZ_Q6,SCHIZ_Q7,SCHIZ_Q8,SCHIZ_Q9,SCHIZ_Q10,SCHIZ_Q11,SCHIZ_Q12,SCHIZ_Q13,SCHIZ_Q14,SCHIZ_Q15,SCHIZ_Q16,SCHIZ_Q17,SCHIZ_Q18,SCHIZ_Q19,SCHIZ_Q20,SCHIZ_Q21,SCHIZ_Q22,SCHIZ_Q23,SCHIZ_Q24,SCHIZ_Q25,SCHIZ_Q26,SCHIZ_Q27))
+
+pathogen_alpha <- cronbach.alpha(dplyr::select(data, PD1, PD2, PD3, PD4, PD5, PD6, PD7))
+
+moral_alpha <- cronbach.alpha(dplyr::select(data, MD1, MD2, MD3, MD4, MD5, MD6, MD7))
+
+sexual_alpha <- cronbach.alpha(dplyr::select(data, SD1, SD2, SD3, SD4, SD5, SD6, SD7))
+```
+
+
+Regressions.  Remember to use the mean centered predictors from TDDScentered!
+```{r}
+schizophrenia_mod <- lm(formula = Schizophrenia ~ total_moral_cent + total_sexual_cent + total_pathogen_cent,
+                        data = TDDScentered) 
+
+summary(schizophrenia_mod)
+
+#Hurrah.  Now rinse and repeat for depression and anxiety.
+
+#anxiety
+anxiety_mod <- lm(formula = `Generalised Anxiety Disorder` ~ total_moral_cent + total_sexual_cent + total_pathogen_cent,
+                        data = TDDScentered) 
+summary(anxiety_mod)
+
+#depression
+depression_mod <- lm(formula = Depression ~ total_moral_cent + total_sexual_cent + total_pathogen_cent,
+                        data = TDDScentered) 
+
+summary(depression_mod)
+```
+
+
+
